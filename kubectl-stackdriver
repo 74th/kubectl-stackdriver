@@ -1,0 +1,52 @@
+#!/usr/bin/python3
+import json
+import sys
+import argparse
+import subprocess
+from typing import Optional, Tuple
+
+
+def load_context(context: Optional[str])->Tuple[str, str]:
+    config = json.loads(subprocess.run(
+        args=["kubectl", "config", "view", "-o", "json"], text=True, capture_output=True
+    ).stdout.strip())
+    if context is None:
+        using_context: str = config["current-context"]
+    else:
+        using_context = context
+
+    for config_context in config["contexts"]:
+        if config_context["name"] == using_context:
+            return using_context, config_context["context"]["namespace"]
+
+    raise Exception("can not load context")
+
+def read_gcp_context_name(context_name: str) -> Tuple[str, str, str]:
+    if not context_name.startswith("gke_"):
+        print("context must starts `gke_`")
+        sys.exit(1)
+    _, project_id, cluster_location, cluster_name = context_name.split("_")
+    return project_id, cluster_location, cluster_name
+
+
+def build_stackdriver_url(project_id: str, cluster_location:str, cluster_name:str, namespace:str,resource: str, kind: Optional[str]=None):
+    return f"https://console.cloud.google.com/logs/query;query=resource.type%3D%22k8s_container%22%0Aresource.labels.project_id%3D%22{project_id}%22%0Aresource.labels.location%3D%22{cluster_location}%22%0Aresource.labels.cluster_name%3D%22{cluster_name}%22%0Aresource.labels.namespace_name%3D%22{namespace}%22%0Alabels.k8s-pod%2Fapp%3D%22{resource}%22?hl=ja&project={project_id}"
+
+
+
+parser = argparse.ArgumentParser(description="")
+parser.add_argument("kind", type=str, help="kind", nargs="?")
+parser.add_argument("resource", type=str, help="resource")
+parser.add_argument("--context", type=str, help="context")
+parser.add_argument("-n", type=str, help="namespace")
+args = parser.parse_args()
+
+if args.context is None or args.n is None:
+    context, namespace = load_context(args.context)
+    if args.n is not None:
+        namespace = args.n
+else:
+    context = args.context
+    namespace = args.n
+project_id, cluster_location, cluster_name = read_gcp_context_name(context)
+print(build_stackdriver_url(project_id, cluster_location, cluster_name, namespace, args.resource, args.kind))
